@@ -1,0 +1,109 @@
+services:
+  question-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: questions
+      POSTGRES_USER: ${QUESTION_DB_USERNAME:?Set QUESTION_DB_USERNAME in .env}
+      POSTGRES_PASSWORD: ${QUESTION_DB_PASSWORD:?Set QUESTION_DB_PASSWORD in .env}
+    volumes:
+    - question-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U "$${POSTGRES_USER}" -d questions
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  quiz-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: quizzes
+      POSTGRES_USER: ${QUIZ_DB_USERNAME:?Set QUIZ_DB_USERNAME in .env}
+      POSTGRES_PASSWORD: ${QUIZ_DB_PASSWORD:?Set QUIZ_DB_PASSWORD in .env}
+    volumes:
+    - quiz-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U "$${POSTGRES_USER}" -d quizzes
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  service-registry:
+    build: ./Service-Registry
+    ports:
+    - 127.0.0.1:8761:8761
+    restart: unless-stopped
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+    mem_limit: 512m
+  question-service:
+    build: ./Question-Service
+    environment:
+      QUESTION_DB_URL: jdbc:postgresql://question-db:5432/questions
+      QUESTION_DB_USERNAME: ${QUESTION_DB_USERNAME}
+      QUESTION_DB_PASSWORD: ${QUESTION_DB_PASSWORD}
+      EUREKA_URL: http://service-registry:8761/eureka/
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?Generate keys with java scripts/SetupEnv.java}
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+    depends_on:
+      question-db:
+        condition: service_healthy
+      service-registry:
+        condition: service_healthy
+    ports:
+    - 127.0.0.1:8081:8081
+    restart: unless-stopped
+    mem_limit: 512m
+  quiz-service:
+    build: ./Quiz-Service
+    environment:
+      QUIZ_DB_URL: jdbc:postgresql://quiz-db:5432/quizzes
+      QUIZ_DB_USERNAME: ${QUIZ_DB_USERNAME}
+      QUIZ_DB_PASSWORD: ${QUIZ_DB_PASSWORD}
+      EUREKA_URL: http://service-registry:8761/eureka/
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?Generate keys with java scripts/SetupEnv.java}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?Generate keys with java scripts/SetupEnv.java}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8765}
+      ACCOUNT_REQUIRE_VERIFICATION: ${ACCOUNT_REQUIRE_VERIFICATION:-false}
+      ACCOUNT_MAIL_ENABLED: ${ACCOUNT_MAIL_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-localhost}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_AUTH: ${SMTP_AUTH:-false}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@quiz.local}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+    depends_on:
+      quiz-db:
+        condition: service_healthy
+      service-registry:
+        condition: service_healthy
+    ports:
+    - 127.0.0.1:8082:8082
+    restart: unless-stopped
+    mem_limit: 512m
+  api-gateway:
+    build: ./Api-Gateway
+    environment:
+      EUREKA_URL: http://service-registry:8761/eureka/
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?Generate keys with java scripts/SetupEnv.java}
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+    depends_on:
+      service-registry:
+        condition: service_healthy
+      quiz-service:
+        condition: service_healthy
+    ports:
+    - 127.0.0.1:8765:8765
+    restart: unless-stopped
+    mem_limit: 512m
+volumes:
+  question-data: null
+  quiz-data: null

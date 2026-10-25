@@ -1,0 +1,77 @@
+name: Verify PostgreSQL services
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      questions:
+        image: postgres:17
+        env: {POSTGRES_DB: questions_test, POSTGRES_USER: test, POSTGRES_PASSWORD: test}
+        ports: ["5433:5432"]
+        options: --health-cmd "pg_isready -U test -d questions_test" --health-interval 5s --health-retries 20
+      quizzes:
+        image: postgres:17
+        env: {POSTGRES_DB: quizzes_test, POSTGRES_USER: test, POSTGRES_PASSWORD: test}
+        ports: ["5434:5432"]
+        options: --health-cmd "pg_isready -U test -d quizzes_test" --health-interval 5s --health-retries 20
+    env:
+      QUESTION_DB_URL: jdbc:postgresql://localhost:5433/questions_test
+      QUESTION_DB_USERNAME: test
+      QUESTION_DB_PASSWORD: test
+      QUIZ_DB_URL: jdbc:postgresql://localhost:5434/quizzes_test
+      QUIZ_DB_USERNAME: test
+      QUIZ_DB_PASSWORD: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17', cache: maven}
+      - run: chmod +x mvnw && ./mvnw -B verify
+  live-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17', cache: maven}
+      - name: Build Java verification tools
+        run: chmod +x mvnw && ./mvnw -B -pl Project-Tools package
+      - name: Generate disposable demo secrets
+        run: java scripts/SetupEnv.java > /dev/null
+      - name: Validate and boot Compose
+        run: ACCOUNT_REQUIRE_VERIFICATION=false docker compose config --quiet && ACCOUNT_REQUIRE_VERIFICATION=false docker compose up --build -d
+      - name: Run live API regression suite
+        shell: bash
+        run: |
+          set -a
+          source .env
+          set +a
+          export DEMO_ADMIN_EMAIL="$BOOTSTRAP_ADMIN_EMAIL"
+          export DEMO_ADMIN_PASSWORD="$BOOTSTRAP_ADMIN_PASSWORD"
+          export RUN_EXPIRY_TEST=1
+          java -jar Project-Tools/target/project-tools.jar smoke
+      - name: Run browser regression suite
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: browser-tests/package-lock.json
+      - name: Exercise browser regression suite
+        shell: bash
+        run: |
+          npm ci --prefix browser-tests
+          npx --prefix browser-tests playwright install --with-deps chromium
+          set -a
+          source .env
+          set +a
+          export BASE_URL=http://localhost:8765
+          export DEMO_ADMIN_EMAIL="$BOOTSTRAP_ADMIN_EMAIL"
+          export DEMO_ADMIN_PASSWORD="$BOOTSTRAP_ADMIN_PASSWORD"
+          npm --prefix browser-tests test
+      - name: Backup and restore drill
+        shell: bash
+        run: |
+          java scripts/DatabaseBackup.java backup backups
+          java scripts/DatabaseBackup.java verify "$(find backups -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v

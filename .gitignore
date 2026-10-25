@@ -1,0 +1,8 @@
+.env
+**/target/
+**/.idea/
+*.log
+*.class
+backups/
+*.dump
+**/node_modules/

@@ -1,0 +1,11 @@
+ALTER TABLE app_users ADD COLUMN auth_version bigint NOT NULL DEFAULT 0;
+ALTER TABLE app_users ADD COLUMN email_verified boolean NOT NULL DEFAULT false;
+UPDATE app_users SET email_verified=true WHERE role='ADMIN';
+ALTER TABLE quiz_attempts ADD COLUMN start_key varchar(100);
+ALTER TABLE quiz_attempts ADD COLUMN autosaved boolean NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX uq_attempt_start_key ON quiz_attempts(quiz_id,student_id,start_key) WHERE start_key IS NOT NULL;
+CREATE TABLE refresh_sessions(hash varchar(64) PRIMARY KEY, user_id varchar(36) NOT NULL REFERENCES app_users(id), family varchar(36) NOT NULL, expires_at timestamptz NOT NULL, used boolean NOT NULL DEFAULT false, revoked boolean NOT NULL DEFAULT false);
+CREATE INDEX ix_refresh_family ON refresh_sessions(family);
+CREATE INDEX ix_refresh_expiry ON refresh_sessions(expires_at);
+CREATE TABLE account_tokens(hash varchar(64) PRIMARY KEY,user_id varchar(36) NOT NULL REFERENCES app_users(id),purpose varchar(20) NOT NULL,expires_at timestamptz NOT NULL,used boolean NOT NULL DEFAULT false);
+CREATE TABLE auth_rate_limits(bucket varchar(64) PRIMARY KEY,window_start timestamptz NOT NULL,hits integer NOT NULL);
